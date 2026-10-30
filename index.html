@@ -7,107 +7,215 @@
 <title>AI Video Studio</title>
 <style>
 *{box-sizing:border-box}
-body{margin:0;background:#0b1020;color:white;font-family:Arial,sans-serif}
-main{max-width:550px;margin:auto;padding:24px}
+body{margin:0;background:#0b1020;color:#fff;font-family:Arial,sans-serif}
+main{max-width:650px;margin:auto;padding:18px}
 h1{font-size:27px}
-p{color:#aebbd0}
-label{display:block;margin:20px 0 8px}
-textarea,select,input{width:100%;padding:13px;background:#19243b;color:white;border:1px solid #41506b;border-radius:12px}
-textarea{height:105px}
-button{width:100%;padding:16px;background:#8057ff;color:white;border:0;border-radius:12px;font-size:17px;font-weight:bold;margin-top:22px}
+p,small{color:#b4c0d5;line-height:1.5}
+.card{background:#172137;padding:18px;border-radius:17px;margin:18px 0}
+label{display:block;margin:14px 0 7px;font-weight:bold}
+input,select,textarea{width:100%;padding:12px;background:#24324c;color:white;border:1px solid #53627d;border-radius:9px}
+textarea{height:100px}
+button{background:#8057ff;color:white;border:0;border-radius:10px;padding:13px;margin:6px 3px 6px 0;font-weight:bold}
 button:disabled{opacity:.5}
-video{width:100%;border-radius:12px;margin-top:18px}
-a{color:#b9a5ff}
-.card{background:#151d30;border-radius:18px;padding:20px;margin-top:20px}
-small{color:#aebbd0}
+.primary{width:100%;font-size:17px}
+.scene{border:1px solid #485574;padding:12px;border-radius:12px;margin:12px 0}
+.scene img{width:100%;max-height:170px;object-fit:contain;margin-top:8px}
+video,audio{width:100%;margin-top:12px}
+a{color:#c5b5ff}
+#stage{width:100%;aspect-ratio:9/16;background:#000;border-radius:12px}
 </style>
 </head>
 <body>
 <main>
 <h1>🎬 AI Video Studio</h1>
-<p>Your private-on-device animation studio</p>
+<p>Multi-photo cinematic video creator</p>
 <div class="card">
-<label>Describe your scene</label>
-<textarea id="prompt" placeholder="A cinematic scene of a traveler in Morocco"></textarea>
-<label>Upload a photo to animate</label>
-<input type="file" id="photo" accept="image/*">
+<label>Video prompt</label>
+<textarea id="prompt" placeholder="Describe your historical video"></textarea>
 <label>Duration</label>
 <select id="duration">
 <option value="5">5 seconds</option>
-<option value="8" selected>8 seconds</option>
-<option value="10">10 seconds</option>
+<option value="8">8 seconds</option>
+<option value="10" selected>10 seconds</option>
+<option value="15">15 seconds</option>
 </select>
-<label>Camera movement</label>
-<select id="motion">
-<option value="zoom">Cinematic zoom</option>
-<option value="pan">Slow horizontal movement</option>
+<h2>📸 Scenes in order</h2>
+<p>Add one photo per scene. Move scenes up or down to change their order.</p>
+<div id="scenes"></div>
+<button onclick="addScene()">+ Add scene</button>
+</div>
+<div class="card">
+<h2>🎙 Narration</h2>
+<label>Narration script</label>
+<textarea id="narration" dir="auto">واش عرفتي بلي فاطمة الفهرية أسسات جامع القرويين ففاس عام 859؟ وولا من أشهر مراكز العلم فالعالم!</textarea>
+<label>Voice preference</label>
+<select id="voice">
+<option value="female">Female voice</option>
+<option value="male">Male voice</option>
 </select>
-<button id="generate">Generate Video</button>
+<button onclick="speak()">Preview narration</button>
+<label>Upload narration audio (MP3, M4A or WAV)</label>
+<input id="audioFile" type="file" accept="audio/*">
+<audio id="audioPreview" controls></audio>
+<p><small>Speech preview uses installed device voices. It does not create an MP3. Upload an audio recording to embed it in the exported video.</small></p>
+</div>
+<div class="card">
+<button class="primary" id="generate" onclick="generate()">🎬 Generate video</button>
 <p id="status"></p>
+<canvas id="stage" width="540" height="960"></canvas>
+<video id="result" controls playsinline hidden></video>
+<a id="download" hidden>Download video</a>
 </div>
-<div class="card" id="result" hidden>
-<h2>Your video</h2>
-<video id="preview" controls playsinline></video>
-<a id="download">Save video</a>
-</div>
-<p><small>Free prototype: animates your image locally. AI prompt generation and realistic character movement require a separate AI service.</small></p>
 </main>
 <script>
 const $=id=>document.getElementById(id);
-let videoURL=null;
-$("generate").onclick=async()=>{
-const file=$("photo").files[0];
-if(!file){alert("Please upload a photo first.");return}
-if(!window.MediaRecorder){alert("Video recording is not supported in this browser.");return}
-$("generate").disabled=true;
-$("status").textContent="Preparing animation...";
-let image=new Image();
-let src=URL.createObjectURL(file);
-try{
-await new Promise((resolve,reject)=>{
-image.onload=resolve;image.onerror=reject;image.src=src;
+let scenes=[],lastURL=null;
+function addScene(){
+scenes.push({file:null,url:null});
+renderScenes();
+}
+function move(i,delta){
+let j=i+delta;
+if(j<0||j>=scenes.length)return;
+[scenes[i],scenes[j]]=[scenes[j],scenes[i]];
+renderScenes();
+}
+function removeScene(i){
+if(scenes[i].url)URL.revokeObjectURL(scenes[i].url);
+scenes.splice(i,1);renderScenes();
+}
+function renderScenes(){
+$("scenes").innerHTML="";
+scenes.forEach((s,i)=>{
+let div=document.createElement("div");
+div.className="scene";
+let title=document.createElement("strong");
+title.textContent="Scene "+(i+1);
+div.append(title);
+let input=document.createElement("input");
+input.type="file";input.accept="image/*";
+input.onchange=e=>{
+let f=e.target.files[0];if(!f)return;
+if(s.url)URL.revokeObjectURL(s.url);
+s.file=f;s.url=URL.createObjectURL(f);
+renderScenes();
+};
+div.append(input);
+if(s.url){
+let img=document.createElement("img");
+img.src=s.url;div.append(img);
+let note=document.createElement("p");
+note.textContent=s.file.name;div.append(note);
+}
+for(let [text,fn] of [
+["↑",()=>move(i,-1)],
+["↓",()=>move(i,1)],
+["Remove",()=>removeScene(i)]
+]){
+let b=document.createElement("button");
+b.textContent=text;b.onclick=fn;div.append(b);
+}
+$("scenes").append(div);
 });
-let canvas=document.createElement("canvas");
-canvas.width=540;canvas.height=960;
-let ctx=canvas.getContext("2d");
+}
+for(let i=0;i<5;i++)addScene();
+$("audioFile").onchange=e=>{
+let f=e.target.files[0];
+if(f)$("audioPreview").src=URL.createObjectURL(f);
+};
+function speak(){
+if(!("speechSynthesis" in window)){
+alert("Speech preview unavailable");return;
+}
+speechSynthesis.cancel();
+let u=new SpeechSynthesisUtterance($("narration").value);
+u.lang="ar-MA";u.rate=.95;
+let voices=speechSynthesis.getVoices();
+let arabic=voices.filter(v=>v.lang.toLowerCase().startsWith("ar"));
+let preferred=arabic.find(v=>v.lang.toLowerCase()==="ar-ma")||arabic[0];
+if(preferred)u.voice=preferred;
+speechSynthesis.speak(u);
+}
+async function generate(){
+let btn=$("generate");
+btn.disabled=true;
+$("status").textContent="Preparing video...";
+try{
+let selected=scenes.filter(s=>s.file);
+if(!selected.length)throw Error("Add at least one photo");
+if(!window.MediaRecorder)throw Error("Recording not supported in this browser");
+let images=await Promise.all(selected.map(s=>new Promise((res,rej)=>{
+let im=new Image();im.onload=()=>res(im);
+im.onerror=rej;im.src=s.url;
+})));
+let canvas=$("stage"),ctx=canvas.getContext("2d");
+let duration=Number($("duration").value)*1000;
 let stream=canvas.captureStream(30);
-let types=["video/mp4","video/webm"];
-let mime=types.find(t=>MediaRecorder.isTypeSupported(t));
-if(!mime)throw Error("No supported recording format");
+let audioFile=$("audioFile").files[0];
+let audioContext=null,audioSource=null;
+let audioElement=null;
+if(audioFile){
+audioContext=new (window.AudioContext||window.webkitAudioContext)();
+let destination=audioContext.createMediaStreamDestination();
+let buffer=await audioFile.arrayBuffer();
+let decoded=await audioContext.decodeAudioData(buffer);
+audioSource=audioContext.createBufferSource();
+audioSource.buffer=decoded;
+audioSource.connect(destination);
+destination.stream.getAudioTracks().forEach(t=>stream.addTrack(t));
+await audioContext.resume();
+}
+let mime=["video/mp4","video/webm"].find(t=>MediaRecorder.isTypeSupported(t));
+if(!mime)throw Error("No supported video format");
 let recorder=new MediaRecorder(stream,{mimeType:mime});
 let chunks=[];
 recorder.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};
-let done=new Promise(resolve=>recorder.onstop=resolve);
-let duration=Number($("duration").value)*1000;
+let stopped=new Promise(r=>recorder.onstop=r);
 let start=performance.now();
 recorder.start();
-$("status").textContent="Creating your video...";
+if(audioSource)audioSource.start();
+$("status").textContent="Rendering scenes...";
+function draw(im,zoom,alpha){
+ctx.globalAlpha=alpha;
+let scale=Math.max(540/im.width,960/im.height)*zoom;
+let w=im.width*scale,h=im.height*scale;
+ctx.drawImage(im,(540-w)/2,(960-h)/2,w,h);
+ctx.globalAlpha=1;
+}
 await new Promise(resolve=>{
 function frame(now){
-let progress=Math.min((now-start)/duration,1);
+let t=Math.min((now-start)/duration,1);
+let position=t*images.length;
+let i=Math.min(Math.floor(position),images.length-1);
+let local=position-i;
 ctx.fillStyle="#000";ctx.fillRect(0,0,540,960);
-let scale=Math.max(540/image.width,960/image.height);
-let zoom=$("motion").value==="zoom"?1+progress*.12:1.12;
-let w=image.width*scale*zoom,h=image.height*scale*zoom;
-let x=(540-w)/2,y=(960-h)/2;
-if($("motion").value==="pan")x+=(progress-.5)*60;
-ctx.drawImage(image,x,y,w,h);
-if(progress<1)requestAnimationFrame(frame);
+draw(images[i],1+local*.07,1);
+if(i<images.length-1&&local>.78){
+let a=(local-.78)/.22;
+draw(images[i+1],1,a);
+}
+if(t<1)requestAnimationFrame(frame);
 else resolve();
 }
 requestAnimationFrame(frame);
 });
-recorder.stop();await done;
-if(videoURL)URL.revokeObjectURL(videoURL);
-videoURL=URL.createObjectURL(new Blob(chunks,{type:mime}));
-$("preview").src=videoURL;
-$("download").href=videoURL;
-$("download").download="ai-video-studio."+(mime==="video/mp4"?"mp4":"webm");
+recorder.stop();await stopped;
+if(audioSource){try{audioSource.stop()}catch(e){}}
+if(audioContext)await audioContext.close();
+if(lastURL)URL.revokeObjectURL(lastURL);
+let blob=new Blob(chunks,{type:mime});
+lastURL=URL.createObjectURL(blob);
+$("result").src=lastURL;
 $("result").hidden=false;
-$("status").textContent="Video ready!";
-}catch(e){$("status").textContent="Error: "+e.message}
-finally{URL.revokeObjectURL(src);$("generate").disabled=false}
-};
+$("download").href=lastURL;
+$("download").download="AI-Video-Studio."+(mime==="video/mp4"?"mp4":"webm");
+$("download").hidden=false;
+$("download").textContent="⬇ Download video";
+$("status").textContent="Video ready! Check the sound before saving.";
+}catch(e){
+$("status").textContent="Error: "+e.message;
+}finally{btn.disabled=false}
+}
 </script>
 </body>
 </html>
