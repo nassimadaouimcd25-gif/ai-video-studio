@@ -1,0 +1,113 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI Video Studio</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#0b1020;color:white;font-family:Arial,sans-serif}
+main{max-width:550px;margin:auto;padding:24px}
+h1{font-size:27px}
+p{color:#aebbd0}
+label{display:block;margin:20px 0 8px}
+textarea,select,input{width:100%;padding:13px;background:#19243b;color:white;border:1px solid #41506b;border-radius:12px}
+textarea{height:105px}
+button{width:100%;padding:16px;background:#8057ff;color:white;border:0;border-radius:12px;font-size:17px;font-weight:bold;margin-top:22px}
+button:disabled{opacity:.5}
+video{width:100%;border-radius:12px;margin-top:18px}
+a{color:#b9a5ff}
+.card{background:#151d30;border-radius:18px;padding:20px;margin-top:20px}
+small{color:#aebbd0}
+</style>
+</head>
+<body>
+<main>
+<h1>🎬 AI Video Studio</h1>
+<p>Your private-on-device animation studio</p>
+<div class="card">
+<label>Describe your scene</label>
+<textarea id="prompt" placeholder="A cinematic scene of a traveler in Morocco"></textarea>
+<label>Upload a photo to animate</label>
+<input type="file" id="photo" accept="image/*">
+<label>Duration</label>
+<select id="duration">
+<option value="5">5 seconds</option>
+<option value="8" selected>8 seconds</option>
+<option value="10">10 seconds</option>
+</select>
+<label>Camera movement</label>
+<select id="motion">
+<option value="zoom">Cinematic zoom</option>
+<option value="pan">Slow horizontal movement</option>
+</select>
+<button id="generate">Generate Video</button>
+<p id="status"></p>
+</div>
+<div class="card" id="result" hidden>
+<h2>Your video</h2>
+<video id="preview" controls playsinline></video>
+<a id="download">Save video</a>
+</div>
+<p><small>Free prototype: animates your image locally. AI prompt generation and realistic character movement require a separate AI service.</small></p>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+let videoURL=null;
+$("generate").onclick=async()=>{
+const file=$("photo").files[0];
+if(!file){alert("Please upload a photo first.");return}
+if(!window.MediaRecorder){alert("Video recording is not supported in this browser.");return}
+$("generate").disabled=true;
+$("status").textContent="Preparing animation...";
+let image=new Image();
+let src=URL.createObjectURL(file);
+try{
+await new Promise((resolve,reject)=>{
+image.onload=resolve;image.onerror=reject;image.src=src;
+});
+let canvas=document.createElement("canvas");
+canvas.width=540;canvas.height=960;
+let ctx=canvas.getContext("2d");
+let stream=canvas.captureStream(30);
+let types=["video/mp4","video/webm"];
+let mime=types.find(t=>MediaRecorder.isTypeSupported(t));
+if(!mime)throw Error("No supported recording format");
+let recorder=new MediaRecorder(stream,{mimeType:mime});
+let chunks=[];
+recorder.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};
+let done=new Promise(resolve=>recorder.onstop=resolve);
+let duration=Number($("duration").value)*1000;
+let start=performance.now();
+recorder.start();
+$("status").textContent="Creating your video...";
+await new Promise(resolve=>{
+function frame(now){
+let progress=Math.min((now-start)/duration,1);
+ctx.fillStyle="#000";ctx.fillRect(0,0,540,960);
+let scale=Math.max(540/image.width,960/image.height);
+let zoom=$("motion").value==="zoom"?1+progress*.12:1.12;
+let w=image.width*scale*zoom,h=image.height*scale*zoom;
+let x=(540-w)/2,y=(960-h)/2;
+if($("motion").value==="pan")x+=(progress-.5)*60;
+ctx.drawImage(image,x,y,w,h);
+if(progress<1)requestAnimationFrame(frame);
+else resolve();
+}
+requestAnimationFrame(frame);
+});
+recorder.stop();await done;
+if(videoURL)URL.revokeObjectURL(videoURL);
+videoURL=URL.createObjectURL(new Blob(chunks,{type:mime}));
+$("preview").src=videoURL;
+$("download").href=videoURL;
+$("download").download="ai-video-studio."+(mime==="video/mp4"?"mp4":"webm");
+$("result").hidden=false;
+$("status").textContent="Video ready!";
+}catch(e){$("status").textContent="Error: "+e.message}
+finally{URL.revokeObjectURL(src);$("generate").disabled=false}
+};
+</script>
+</body>
+</html>
